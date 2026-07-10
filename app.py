@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import io
-from file_process import load_excel_and_find_header, clean_float
+from file_process import load_excel_and_find_header, clean_float, filter_invalid_rows
 # Import reconciliation functions
 from conciliate import conciliate_c_e, find_next_reconciliation_step
 
@@ -154,6 +154,12 @@ if file1 is not None or file2 is not None:
                     df1_preview = load_excel_and_find_header(tmp_preview_path)
                     os.unlink(tmp_preview_path)
                     file1.seek(0)
+                    
+                    preview_debito = next((c for c in df1_preview.columns if str(c).strip().lower() in ['débito', 'debito']), None)
+                    preview_credito = next((c for c in df1_preview.columns if str(c).strip().lower() in ['crédito', 'credito']), None)
+                    if preview_debito and preview_credito:
+                        df1_preview = filter_invalid_rows(df1_preview, preview_debito, preview_credito)
+                        
                     st.dataframe(df1_preview, use_container_width=True, hide_index=True)
                 except Exception as e:
                     st.error(f"Could not read Contabilidade preview: {e}")
@@ -261,6 +267,9 @@ if run_clicked:
             if not debito_col or not credito_col:
                 st.error(f"Could not find 'Débito' and 'Crédito' columns in Contabilidade. Found: {list(df1.columns)}")
                 st.stop()
+
+            # Filter out invalid/empty/non-numeric rows
+            df1 = filter_invalid_rows(df1, debito_col, credito_col)
 
             # 2. Load Extrato
             df2 = pd.read_excel(file2)

@@ -63,6 +63,25 @@ def clean_float(val):
     except ValueError:
         return 0.0
 
+def filter_invalid_rows(df, debito_col, credito_col):
+    """
+    Filters out rows where both debito_col and credito_col are empty, NaN, or non-numeric strings.
+    """
+    def is_valid_numeric(val):
+        if pd.isna(val):
+            return False
+        if isinstance(val, (int, float)):
+            return True
+        s = str(val).strip()
+        if not s:
+            return False
+        if not any(c.isdigit() for c in s):
+            return False
+        return True
+
+    mask = df.apply(lambda row: is_valid_numeric(row[debito_col]) or is_valid_numeric(row[credito_col]), axis=1)
+    return df[mask].copy()
+
 
 
 
