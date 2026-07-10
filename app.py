@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import io
 from file_process import load_excel_and_find_header, clean_float, filter_invalid_rows
-# Import reconciliation functions
 from conciliate import conciliate_c_e, find_next_reconciliation_step
 
 # --- Page config ---
@@ -102,10 +101,43 @@ if "credito_col" not in st.session_state:
 if "file2_col" not in st.session_state:
     st.session_state.file2_col = None
 
+def extract_key_fields(row, df_cols):
+    # Find candidate columns
+    date_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["data", "date", "dt", "dia"])), None)
+    desc_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["desc", "hist", "detalhe", "narrative", "info", "nome", "concepto", "parceiro", "cliente", "fornecedor"])), None)
+    doc_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["doc", "ref", "num", "id", "trans", "cheque", "recibo"])), None)
+    
+    # Extract values
+    date_val = "N/A"
+    if date_col is not None and pd.notna(row[date_col]):
+        val = row[date_col]
+        if hasattr(val, "strftime"):
+            date_val = val.strftime("%d/%m/%Y")
+        else:
+            date_val = str(val).split(" ")[0]
+            
+    desc_val = "N/A"
+    if desc_col is not None and pd.notna(row[desc_col]):
+        desc_val = str(row[desc_col]).strip()
+        
+    doc_val = ""
+    if doc_col is not None and pd.notna(row[doc_col]):
+        doc_val = str(row[doc_col]).strip()
+        
+    # Fallback if date/desc are not found
+    if date_val == "N/A" and desc_val == "N/A":
+        # Just grab the first few columns
+        non_empty_parts = [f"{col}: {val}" for col, val in row.items() if pd.notna(val) and str(val).strip() != ""]
+        if len(non_empty_parts) > 0:
+            desc_val = " | ".join(non_empty_parts[:3])
+            
+    return date_val, desc_val, doc_val
+
+
 # --- Header ---
 st.markdown("""
 <div class="main-title">
-    <h1>🏦 Conciliação Bancária</h1>
+    <h1>Conciliação Bancária</h1>
     <p>Upload your files, pick the value column, and reconcile.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -296,7 +328,6 @@ if run_clicked:
 # --- Results or Conflict UI ---
 if st.session_state.reconciliation_stage == "conflict":
     st.divider()
-    st.markdown('<h3 style="color:#f39c12; margin-top:0;">⚠️ Match Conflict Group</h3>', unsafe_allow_html=True)
     
     conflict = st.session_state.current_conflict
     val = conflict["value"]
@@ -309,67 +340,145 @@ if st.session_state.reconciliation_stage == "conflict":
     credito_col = st.session_state.credito_col
     file2_col = st.session_state.file2_col
 
-    st.info(f"Múltiplas transações encontradas com o valor correspondente a **{val}**. Contabilidade: **{len(c_indices)}** linhas vs Extrato: **{len(e_indices)}** linhas. Faça a correspondência individual abaixo:")
-
-    col_c, col_e = st.columns(2)
-    with col_c:
-        st.markdown("**Contabilidade:**")
-        st.dataframe(df1_rem.loc[c_indices], use_container_width=True, hide_index=True)
-    with col_e:
-        st.markdown("**Extrato:**")
-        st.dataframe(df2_rem.loc[e_indices], use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.markdown("**Selecione a linha correspondente do Extrato para cada linha da Contabilidade:**")
+    # Format title card with gradient orange styling
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #f57c00 0%, #ff9800 100%);
+            padding: 1.5rem;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 15px rgba(245, 124, 0, 0.15);
+        ">
+            <h3 style="margin: 0; color: white; font-weight: 700; font-size: 1.35rem;">⚠️ Resolver Conflito de Correspondência</h3>
+            <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 0.95rem; line-height: 1.4;">
+                Múltiplas transações encontradas com o valor correspondente a <b>{abs(val):,.2f}€</b> ({'Crédito' if val >= 0 else 'Débito'}).<br/>
+                Contabilidade: <b>{len(c_indices)}</b> {'linhas' if len(c_indices) >= 2 else 'linha'} vs Extrato: <b>{len(e_indices)}</b> {'linhas' if len(e_indices) >= 2 else 'linha'}.
+                Por favor, faça as associações corretas abaixo.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     # Pre-format Extrato options
-    extrato_options = ["Unmatched / Keep"]
+    extrato_options = ["Não conciliar / Manter aberto"]
     extrato_mapping = {}
+    extrato_mapping["Não conciliar / Manter aberto"] = "Unmatched / Keep"
     for idx_e in e_indices:
         row = df2_rem.loc[idx_e]
+        e_date, e_desc, e_doc = extract_key_fields(row, df2_rem.columns)
+        
         parts = []
-        for col, cell_val in row.items():
-            if pd.notna(cell_val) and str(cell_val).strip() != "":
-                parts.append(f"{col}: {cell_val}")
-        option_label = f"Linha {idx_e} — " + " | ".join(parts[:5])
+        if e_date != "N/A":
+            parts.append(e_date)
+        if e_desc != "N/A":
+            truncated_desc = e_desc[:40] + "..." if len(e_desc) > 40 else e_desc
+            parts.append(truncated_desc)
+        if e_doc:
+            parts.append(f"Doc: {e_doc}")
+            
+        option_label = f"Linha {idx_e} — " + " | ".join(parts)
         extrato_options.append(option_label)
         extrato_mapping[option_label] = idx_e
 
+    # Setup columns layout
+    col_c, col_e = st.columns([1.1, 0.9])
+    
     selections = {}
-    for idx_c in c_indices:
-        row_c = df1_rem.loc[idx_c]
-        parts_c = []
-        for col, cell_val in row_c.items():
-            if pd.notna(cell_val) and str(cell_val).strip() != "":
-                parts_c.append(f"{col}: {cell_val}")
-        row_c_summary = f"Contabilidade {idx_c} — " + " | ".join(parts_c[:5])
-        
-        selected = st.selectbox(
-            f"Corresponde a ({row_c_summary}):",
-            options=extrato_options,
-            key=f"match_group_{val}_{idx_c}"
-        )
-        selections[idx_c] = selected
+    
+    with col_c:
+        st.markdown("### 📄 Contabilidade")
+        for idx_c in c_indices:
+            row_c = df1_rem.loc[idx_c]
+            c_date, c_desc, c_doc = extract_key_fields(row_c, df1_rem.columns)
+            
+            with st.container(border=True):
+                st.markdown(f"**Lançamento #{idx_c}**")
+                
+                details_html = f"""
+                <div style='font-size: 0.88rem; margin-bottom: 12px; line-height: 1.45;'>
+                    <b>Data:</b> {c_date}<br/>
+                    <b>Descrição:</b> {c_desc}
+                    {f'<br/><b>Doc:</b> {c_doc}' if c_doc else ''}
+                </div>
+                """
+                st.markdown(details_html, unsafe_allow_html=True)
+                
+                selected = st.selectbox(
+                    "Selecione o correspondente do Extrato:",
+                    options=extrato_options,
+                    key=f"match_group_{val}_{idx_c}",
+                    label_visibility="collapsed"
+                )
+                selections[idx_c] = selected
+
+    # Gather matching details for badge updates
+    with col_e:
+        st.markdown("### 🏦 Extrato Bancário")
+        for idx_e in e_indices:
+            row_e = df2_rem.loc[idx_e]
+            e_date, e_desc, e_doc = extract_key_fields(row_e, df2_rem.columns)
+            
+            # Find which Contabilidade row has matched this Extrato item
+            matched_by = []
+            for c_idx, sel_label in selections.items():
+                if sel_label != "Não conciliar / Manter aberto" and extrato_mapping[sel_label] == idx_e:
+                    matched_by.append(c_idx)
+            
+            with st.container(border=True):
+                if len(matched_by) == 0:
+                    status_badge = '<span style="background-color: #1e3a1e; color: #4ade80; border: 1px solid #2e7d32; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Disponível</span>'
+                elif len(matched_by) == 1:
+                    status_badge = f'<span style="background-color: #1e293b; color: #38bdf8; border: 1px solid #1d4ed8; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">-> Lançamento #{matched_by[0]}</span>'
+                else:
+                    status_badge = f'<span style="background-color: #450a0a; color: #f87171; border: 1px solid #b91c1c; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Duplicado (#{", ".join(map(str, matched_by))})</span>'
+                
+                st.markdown(
+                    f"""
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 0.95rem;">Lançamento #{idx_e}</span>
+                        {status_badge}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                details_html = f"""
+                <div style='font-size: 0.88rem; line-height: 1.45;'>
+                    <b>Data:</b> {e_date}<br/>
+                    <b>Descrição:</b> {e_desc}
+                    {f'<br/><b>Doc:</b> {e_doc}' if e_doc else ''}
+                </div>
+                """
+                st.markdown(details_html, unsafe_allow_html=True)
 
     # Validation: check for duplicate matches
-    chosen_labels = [v for v in selections.values() if v != "Unmatched / Keep"]
+    chosen_labels = [v for v in selections.values() if v != "Não conciliar / Manter aberto"]
     has_duplicates = len(chosen_labels) != len(set(chosen_labels))
 
+    st.markdown("---")
     if has_duplicates:
-        st.error("⚠️ Cada linha do Extrato só pode ser selecionada uma vez!")
+        st.error("⚠️ Atenção: Cada linha do Extrato só pode ser selecionada uma vez!")
 
-    if st.button("Confirmar Correspondências", type="primary", use_container_width=True, disabled=has_duplicates):
+    col_btn_left, col_btn_right = st.columns([1, 1])
+    with col_btn_left:
+        # Button to confirm matches
+        confirm_clicked = st.button("Confirmar Correspondências", type="primary", use_container_width=True, disabled=has_duplicates)
+        
+    if confirm_clicked:
         c_to_drop = []
         e_to_drop = []
         c_unmatched = []
         
         for idx_c, selected_label in selections.items():
-            if selected_label == "Unmatched / Keep":
+            mapped_val = extrato_mapping[selected_label]
+            if mapped_val == "Unmatched / Keep":
                 c_unmatched.append(idx_c)
             else:
-                chosen_idx_e = extrato_mapping[selected_label]
                 c_to_drop.append(idx_c)
-                e_to_drop.append(chosen_idx_e)
+                e_to_drop.append(mapped_val)
                 
         # 1. Handle matched ones (delete from both)
         if c_to_drop:
@@ -390,6 +499,15 @@ if st.session_state.reconciliation_stage == "conflict":
         # Proceed
         advance_reconciliation()
         st.rerun()
+
+    # Expander with raw complete tables for reference
+    with st.expander("🔍 Visualizar tabelas completas em conflito", expanded=False):
+        tab1, tab2 = st.tabs(["Contabilidade Completa", "Extrato Completo"])
+        with tab1:
+            st.dataframe(df1_rem.loc[c_indices], use_container_width=True, hide_index=True)
+        with tab2:
+            st.dataframe(df2_rem.loc[e_indices], use_container_width=True, hide_index=True)
+
 
 elif st.session_state.reconciliation_results is not None:
     df1_final = st.session_state.reconciliation_results["df1_final"]
