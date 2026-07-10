@@ -148,24 +148,22 @@ st.markdown("""
 col_up1, col_up2 = st.columns(2)
 
 with col_up1:
-    st.markdown("**Contabilidade**")
     file1 = st.file_uploader(
-        "Carregue o ficheiro de Contabilidade",
+        "Contabilidade",
         type=["xlsx", "xls", "xlsm", "xlsb"],
         accept_multiple_files=False,
         key="contabilidade",
-        label_visibility="collapsed",
+        help="Ficheiro com os dados da contabilidade.",
         on_change=clear_results,
     )
 
 with col_up2:
-    st.markdown("**Extrato Bancário**")
     file2 = st.file_uploader(
-        "Carregue o ficheiro de Extrato Bancário",
+        "Extrato Bancário",
         type=["xlsx", "xls", "xlsm", "xlsb"],
         accept_multiple_files=False,
         key="extrato",
-        label_visibility="collapsed",
+        help="Ficheiro do extrato bancário, obtido num banco. Caso só tenha em PDF ou noutro tipo de ficheiro que não seja um dos referidos abaixo, sugiro que peça ao ChatGPT que converta a tabela no seu ficheiro para um dos ficheiros compatíveis.",
         on_change=clear_results,
     )
 
@@ -219,8 +217,6 @@ if file2 is not None:
         file2.seek(0)
 
         if available_columns:
-            st.markdown("**Selecione a coluna de valor do ficheiro de Extrato**")
-            
             # Find if any available column matches a preferred label
             preferred_index = None
             for idx, col in enumerate(available_columns):
@@ -229,11 +225,11 @@ if file2 is not None:
                     break
             
             file2_col = st.selectbox(
-                "Coluna",
+                "Selecione a coluna de valor do ficheiro de Extrato",
                 options=available_columns,
                 index=preferred_index,
                 placeholder="Escolha a coluna de valor...",
-                label_visibility="collapsed",
+                help='Os ficheiros de extratos bancários podem assumir um nome diferente de "valor" para a coluna dos valores. Assim, para garantir que o programa funciona independentemente da designação, o utilizador poderá selecionar manualmente a coluna que contém os valores. Caso haja uma coluna chamada "valor" ou com outro nome... sugestivo, será selecionada por defeito.',
                 on_change=clear_results,
             )
         else:
