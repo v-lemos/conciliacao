@@ -3,13 +3,8 @@ import pandas as pd
 import os
 import io
 from file_process import load_excel_and_find_header, clean_float
-from importlib import import_module
-
 # Import reconciliation functions
-conciliate_c_e_module = import_module("conciliate_c-e")
-conciliate_e_c_module = import_module("conciliate_e-c")
-conciliate_c_e = conciliate_c_e_module.conciliate_c_e
-conciliate_e_c = conciliate_e_c_module.conciliate_e_c
+from conciliate import conciliate_c_e
 
 # --- Page config ---
 st.set_page_config(
@@ -221,11 +216,8 @@ if run_clicked:
                 st.error(f"Column '{file2_col}' not found in the Extrato file.")
                 st.stop()
 
-            # 3. Reconciliation Step 1 (C → E)
-            df1_step1, df2_step1 = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
-
-            # 4. Reconciliation Step 2 (E → C)
-            df1_final, df2_final = conciliate_e_c(df1_step1, df2_step1, debito_col, credito_col, file2_col)
+            # 3. Reconciliation (C → E)
+            df1_final, df2_final = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
 
             st.session_state.reconciliation_results = {
                 "df1_final": df1_final,

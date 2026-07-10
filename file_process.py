@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from conciliate import conciliate_c_e
 
 def get_valid_excel_path(prompt):
     """
@@ -125,13 +126,6 @@ def clean_float(val):
     except ValueError:
         return 0.0
 
-from importlib import import_module
-conciliate_c_e_module = import_module("conciliate_c-e")
-conciliate_e_c_module = import_module("conciliate_e-c")
-
-conciliate_c_e = conciliate_c_e_module.conciliate_c_e
-conciliate_e_c = conciliate_e_c_module.conciliate_e_c
-
 
 def process_excel_files(file1_path, file2_path, file2_col):
     """
@@ -162,15 +156,10 @@ def process_excel_files(file1_path, file2_path, file2_col):
             
         print(f"Validated Extrato Bancário column: '{file2_col}'")
         
-        # Perform reconciliation step 1 (Contabilidade -> Extrato)
-        print("\nRunning reconciliation Step 1 (Contabilidade -> Extrato)...")
-        df1_after_step1, df2_after_step1 = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
-        print(f"Remaining after Step 1 - Contabilidade: {len(df1_after_step1)} rows, Extrato: {len(df2_after_step1)} rows")
-        
-        # Perform reconciliation step 2 (Extrato -> Contabilidade)
-        print("Running reconciliation Step 2 (Extrato -> Contabilidade)...")
-        df1_final, df2_final = conciliate_e_c(df1_after_step1, df2_after_step1, debito_col, credito_col, file2_col)
-        print(f"Remaining final - Contabilidade: {len(df1_final)} rows, Extrato: {len(df2_final)} rows")
+        # Perform reconciliation (Contabilidade -> Extrato)
+        print("\nRunning reconciliation (Contabilidade -> Extrato)...")
+        df1_final, df2_final = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
+        print(f"Remaining - Contabilidade: {len(df1_final)} rows, Extrato: {len(df2_final)} rows")
         
         return df1_final, df2_final
         
