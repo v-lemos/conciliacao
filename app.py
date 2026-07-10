@@ -1,3 +1,7 @@
+import os
+# Prevent pyarrow mimalloc segmentation fault on macOS Apple Silicon / Python 3.14+
+os.environ["ARROW_DEFAULT_MEMORY_POOL"] = "system"
+
 import sys
 import importlib
 
@@ -31,25 +35,25 @@ st.markdown("""
     .main-title h1 {
         font-size: 2rem;
         font-weight: 700;
-        color: #ffffff;
+        color: var(--text-color);
     }
     .main-title p {
-        color: #a0aec0;
+        color: var(--secondary-text-color);
         font-size: 0.95rem;
         margin-top: -0.5rem;
     }
 
     /* Metric cards */
     .metric-card {
-        background: #f8f9fa;
+        background: var(--secondary-background-color);
         border-radius: 10px;
         padding: 1.2rem 1rem;
         text-align: center;
-        border: 1px solid #e9ecef;
+        border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
     }
     .metric-card .label {
         font-size: 0.8rem;
-        color: #6c757d;
+        color: var(--secondary-text-color);
         text-transform: uppercase;
         letter-spacing: 0.05em;
         margin-bottom: 0.3rem;
@@ -57,17 +61,47 @@ st.markdown("""
     .metric-card .value {
         font-size: 1.8rem;
         font-weight: 700;
-        color: #1a1a2e;
+        color: var(--text-color);
     }
 
     /* Status messages */
     .step-msg {
         font-size: 0.85rem;
-        color: #495057;
+        color: var(--secondary-text-color);
         padding: 0.2rem 0;
+    }
+
+    /* Badges */
+    .badge-available {
+        background-color: rgba(74, 222, 128, 0.15);
+        color: #22c55e;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .badge-matched {
+        background-color: rgba(56, 189, 248, 0.15);
+        color: #0284c7;
+        border: 1px solid rgba(2, 132, 199, 0.3);
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .badge-duplicate {
+        background-color: rgba(248, 113, 113, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
     }
 </style>
 """, unsafe_allow_html=True)
+
 
 # --- Preferred Labels for Extrato Column ---
 PREFERRED_LABELS = ["Valor"]
@@ -189,7 +223,7 @@ if file1 is not None or file2 is not None:
                     if preview_debito and preview_credito:
                         df1_preview = filter_invalid_rows(df1_preview, preview_debito, preview_credito)
                         
-                    st.dataframe(df1_preview, use_container_width=True, hide_index=True)
+                    st.dataframe(df1_preview, width="stretch", hide_index=True)
                 except Exception as e:
                     st.error(f"Não foi possível ler a pré-visualização da Contabilidade: {e}")
             else:
@@ -201,7 +235,7 @@ if file1 is not None or file2 is not None:
                     file2.seek(0)
                     df2_preview = pd.read_excel(file2)
                     file2.seek(0)
-                    st.dataframe(df2_preview, use_container_width=True, hide_index=True)
+                    st.dataframe(df2_preview, width="stretch", hide_index=True)
                 except Exception as e:
                     st.error(f"Não foi possível ler a pré-visualização do Extrato: {e}")
             else:
@@ -239,7 +273,7 @@ if file2 is not None:
 
 # --- Run button ---
 can_run = file1 is not None and file2 is not None and file2_col is not None
-run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, use_container_width=True, type="primary")
+run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, width="stretch", type="primary")
 
 # --- Processing ---
 def advance_reconciliation():
@@ -420,11 +454,11 @@ if st.session_state.reconciliation_stage == "conflict":
             
             with st.container(border=True):
                 if len(matched_by) == 0:
-                    status_badge = '<span style="background-color: #1e3a1e; color: #4ade80; border: 1px solid #2e7d32; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Disponível</span>'
+                    status_badge = '<span class="badge-available">Disponível</span>'
                 elif len(matched_by) == 1:
-                    status_badge = f'<span style="background-color: #1e293b; color: #38bdf8; border: 1px solid #1d4ed8; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">-> Lançamento #{matched_by[0]}</span>'
+                    status_badge = f'<span class="badge-matched">-&gt; Lançamento #{matched_by[0]}</span>'
                 else:
-                    status_badge = f'<span style="background-color: #450a0a; color: #f87171; border: 1px solid #b91c1c; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Duplicado (#{", ".join(map(str, matched_by))})</span>'
+                    status_badge = f'<span class="badge-duplicate">Duplicado (#{", ".join(map(str, matched_by))})</span>'
                 
                 st.markdown(
                     f"""
@@ -455,7 +489,7 @@ if st.session_state.reconciliation_stage == "conflict":
     col_btn_left, col_btn_right = st.columns([1, 1])
     with col_btn_left:
         # Button to confirm matches
-        confirm_clicked = st.button("Confirmar Correspondências", type="primary", use_container_width=True, disabled=has_duplicates)
+        confirm_clicked = st.button("Confirmar Correspondências", type="primary", width="stretch", disabled=has_duplicates)
         
     if confirm_clicked:
         c_to_drop = []
@@ -494,9 +528,9 @@ if st.session_state.reconciliation_stage == "conflict":
     with st.expander("🔍 Visualizar tabelas completas em conflito", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade Completa", "Extrato Completo"])
         with tab1:
-            st.dataframe(df1_rem.loc[c_indices], use_container_width=True, hide_index=True)
+            st.dataframe(df1_rem.loc[c_indices], width="stretch", hide_index=True)
         with tab2:
-            st.dataframe(df2_rem.loc[e_indices], use_container_width=True, hide_index=True)
+            st.dataframe(df2_rem.loc[e_indices], width="stretch", hide_index=True)
 
 
 elif st.session_state.reconciliation_results is not None:
@@ -529,9 +563,9 @@ elif st.session_state.reconciliation_results is not None:
     with st.expander("🔍 Pré-visualizar Linhas Não Conciliadas", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade Restante", "Extrato Restante"])
         with tab1:
-            st.dataframe(df1_final, use_container_width=True, hide_index=True)
+            st.dataframe(df1_final, width="stretch", hide_index=True)
         with tab2:
-            st.dataframe(df2_final, use_container_width=True, hide_index=True)
+            st.dataframe(df2_final, width="stretch", hide_index=True)
 
     # --- Download buttons ---
     st.write("")
@@ -548,7 +582,7 @@ elif st.session_state.reconciliation_results is not None:
             data=to_excel_bytes(df1_final),
             file_name="contabilidade_restante.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
     with col_dl2:
         st.download_button(
@@ -556,5 +590,5 @@ elif st.session_state.reconciliation_results is not None:
             data=to_excel_bytes(df2_final),
             file_name="extrato_restante.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
