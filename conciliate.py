@@ -74,28 +74,3 @@ def find_next_reconciliation_step(df1, df2, debito_col, credito_col, file2_col):
             }
             
     return df1_remaining, df2_remaining, "done", None
-
-def conciliate_c_e(df1, df2, debito_col, credito_col, file2_col):
-    """
-    Reconciles Contabilidade to Extrato:
-    For each row in Contabilidade, looks for matching value in Extrato:
-      - If Débito is non-zero (V), looks for -V in Extrato.
-      - If Crédito is non-zero (V), looks for V in Extrato.
-    Drops matched rows from both dataframes.
-    Note: For backward compatibility, conflict groups are resolved by pairwise sequential matching.
-    """
-    df1_curr = df1.copy()
-    df2_curr = df2.copy()
-    while True:
-        df1_curr, df2_curr, status, conflict = find_next_reconciliation_step(
-            df1_curr, df2_curr, debito_col, credito_col, file2_col
-        )
-        if status == "done":
-            break
-        elif status == "conflict":
-            c_indices = conflict["c_indices"]
-            e_indices = conflict["e_indices"]
-            num_to_match = min(len(c_indices), len(e_indices))
-            df1_curr = df1_curr.drop(index=c_indices[:num_to_match])
-            df2_curr = df2_curr.drop(index=e_indices[:num_to_match])
-    return df1_curr, df2_curr
