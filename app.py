@@ -4,7 +4,7 @@ import os
 import io
 from file_process import load_excel_and_find_header, clean_float
 # Import reconciliation functions
-from conciliate import conciliate_c_e
+from conciliate import conciliate_c_e, find_next_reconciliation_step
 
 # --- Page config ---
 st.set_page_config(
@@ -74,9 +74,33 @@ PREFERRED_LABELS = ["Valor"]
 
 def clear_results():
     st.session_state.reconciliation_results = None
+    st.session_state.df1_remaining = None
+    st.session_state.df2_remaining = None
+    st.session_state.reconciliation_stage = None
+    st.session_state.current_conflict = None
+    st.session_state.unmatched_df1 = None
+    st.session_state.debito_col = None
+    st.session_state.credito_col = None
+    st.session_state.file2_col = None
 
 if "reconciliation_results" not in st.session_state:
     st.session_state.reconciliation_results = None
+if "df1_remaining" not in st.session_state:
+    st.session_state.df1_remaining = None
+if "df2_remaining" not in st.session_state:
+    st.session_state.df2_remaining = None
+if "reconciliation_stage" not in st.session_state:
+    st.session_state.reconciliation_stage = None
+if "current_conflict" not in st.session_state:
+    st.session_state.current_conflict = None
+if "unmatched_df1" not in st.session_state:
+    st.session_state.unmatched_df1 = None
+if "debito_col" not in st.session_state:
+    st.session_state.debito_col = None
+if "credito_col" not in st.session_state:
+    st.session_state.credito_col = None
+if "file2_col" not in st.session_state:
+    st.session_state.file2_col = None
 
 # --- Header ---
 st.markdown("""
@@ -187,7 +211,36 @@ can_run = file1 is not None and file2 is not None and file2_col is not None
 run_clicked = st.button("▶  Run Reconciliation", disabled=not can_run, use_container_width=True, type="primary")
 
 # --- Processing ---
+def advance_reconciliation():
+    df1_remaining = st.session_state.df1_remaining
+    df2_remaining = st.session_state.df2_remaining
+    debito_col = st.session_state.debito_col
+    credito_col = st.session_state.credito_col
+    file2_col = st.session_state.file2_col
+
+    df1_next, df2_next, stage, conflict = find_next_reconciliation_step(
+        df1_remaining, df2_remaining, debito_col, credito_col, file2_col
+    )
+    
+    st.session_state.df1_remaining = df1_next
+    st.session_state.df2_remaining = df2_next
+    st.session_state.reconciliation_stage = stage
+    st.session_state.current_conflict = conflict
+    
+    if stage == "done":
+        # Concatenate any manually unmatched Contabilidade rows back
+        if st.session_state.unmatched_df1 is not None and not st.session_state.unmatched_df1.empty:
+            df1_final = pd.concat([df1_next, st.session_state.unmatched_df1])
+        else:
+            df1_final = df1_next
+            
+        st.session_state.reconciliation_results = {
+            "df1_final": df1_final,
+            "df2_final": df2_next
+        }
+
 if run_clicked:
+    clear_results()
     with st.spinner("Reading and reconciling files…"):
         try:
             # 1. Load Contabilidade with auto-header finder
@@ -216,20 +269,120 @@ if run_clicked:
                 st.error(f"Column '{file2_col}' not found in the Extrato file.")
                 st.stop()
 
-            # 3. Reconciliation (C → E)
-            df1_final, df2_final = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
+            # Initialize reconciliation state
+            st.session_state.df1_remaining = df1.copy()
+            st.session_state.df2_remaining = df2.copy()
+            st.session_state.debito_col = debito_col
+            st.session_state.credito_col = credito_col
+            st.session_state.file2_col = file2_col
+            st.session_state.unmatched_df1 = pd.DataFrame(columns=df1.columns)
 
-            st.session_state.reconciliation_results = {
-                "df1_final": df1_final,
-                "df2_final": df2_final
-            }
+            # Run reconciliation
+            advance_reconciliation()
 
         except Exception as e:
             st.error(f"An error occurred during reconciliation: {e}")
             st.stop()
 
-# --- Results ---
-if st.session_state.reconciliation_results is not None:
+# --- Results or Conflict UI ---
+if st.session_state.reconciliation_stage == "conflict":
+    st.divider()
+    st.markdown('<h3 style="color:#f39c12; margin-top:0;">⚠️ Match Conflict Group</h3>', unsafe_allow_html=True)
+    
+    conflict = st.session_state.current_conflict
+    val = conflict["value"]
+    c_indices = conflict["c_indices"]
+    e_indices = conflict["e_indices"]
+    
+    df1_rem = st.session_state.df1_remaining
+    df2_rem = st.session_state.df2_remaining
+    debito_col = st.session_state.debito_col
+    credito_col = st.session_state.credito_col
+    file2_col = st.session_state.file2_col
+
+    st.info(f"Múltiplas transações encontradas com o valor correspondente a **{val}**. Contabilidade: **{len(c_indices)}** linhas vs Extrato: **{len(e_indices)}** linhas. Faça a correspondência individual abaixo:")
+
+    col_c, col_e = st.columns(2)
+    with col_c:
+        st.markdown("**Contabilidade:**")
+        st.dataframe(df1_rem.loc[c_indices], use_container_width=True, hide_index=True)
+    with col_e:
+        st.markdown("**Extrato:**")
+        st.dataframe(df2_rem.loc[e_indices], use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("**Selecione a linha correspondente do Extrato para cada linha da Contabilidade:**")
+
+    # Pre-format Extrato options
+    extrato_options = ["Unmatched / Keep"]
+    extrato_mapping = {}
+    for idx_e in e_indices:
+        row = df2_rem.loc[idx_e]
+        parts = []
+        for col, cell_val in row.items():
+            if pd.notna(cell_val) and str(cell_val).strip() != "":
+                parts.append(f"{col}: {cell_val}")
+        option_label = f"Linha {idx_e} — " + " | ".join(parts[:5])
+        extrato_options.append(option_label)
+        extrato_mapping[option_label] = idx_e
+
+    selections = {}
+    for idx_c in c_indices:
+        row_c = df1_rem.loc[idx_c]
+        parts_c = []
+        for col, cell_val in row_c.items():
+            if pd.notna(cell_val) and str(cell_val).strip() != "":
+                parts_c.append(f"{col}: {cell_val}")
+        row_c_summary = f"Contabilidade {idx_c} — " + " | ".join(parts_c[:5])
+        
+        selected = st.selectbox(
+            f"Corresponde a ({row_c_summary}):",
+            options=extrato_options,
+            key=f"match_group_{val}_{idx_c}"
+        )
+        selections[idx_c] = selected
+
+    # Validation: check for duplicate matches
+    chosen_labels = [v for v in selections.values() if v != "Unmatched / Keep"]
+    has_duplicates = len(chosen_labels) != len(set(chosen_labels))
+
+    if has_duplicates:
+        st.error("⚠️ Cada linha do Extrato só pode ser selecionada uma vez!")
+
+    if st.button("Confirmar Correspondências", type="primary", use_container_width=True, disabled=has_duplicates):
+        c_to_drop = []
+        e_to_drop = []
+        c_unmatched = []
+        
+        for idx_c, selected_label in selections.items():
+            if selected_label == "Unmatched / Keep":
+                c_unmatched.append(idx_c)
+            else:
+                chosen_idx_e = extrato_mapping[selected_label]
+                c_to_drop.append(idx_c)
+                e_to_drop.append(chosen_idx_e)
+                
+        # 1. Handle matched ones (delete from both)
+        if c_to_drop:
+            st.session_state.df1_remaining = df1_rem.drop(index=c_to_drop)
+        if e_to_drop:
+            st.session_state.df2_remaining = df2_rem.drop(index=e_to_drop)
+            
+        # 2. Handle unmatched Contabilidade items:
+        # "delete the row and add them to the list of unmatched items"
+        if c_unmatched:
+            # We append the unmatched rows to unmatched_df1
+            st.session_state.unmatched_df1 = pd.concat([st.session_state.unmatched_df1, df1_rem.loc[c_unmatched]])
+            # Drop them from active df1_remaining so they don't block the next stages
+            st.session_state.df1_remaining = st.session_state.df1_remaining.drop(index=c_unmatched)
+            
+        st.toast("Correspondências processadas!", icon="✅")
+        
+        # Proceed
+        advance_reconciliation()
+        st.rerun()
+
+elif st.session_state.reconciliation_results is not None:
     df1_final = st.session_state.reconciliation_results["df1_final"]
     df2_final = st.session_state.reconciliation_results["df2_final"]
 
