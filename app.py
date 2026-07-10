@@ -60,13 +60,6 @@ st.markdown("""
         color: #1a1a2e;
     }
 
-    /* Section dividers */
-    hr {
-        border: none;
-        border-top: 1px solid #e9ecef;
-        margin: 1.5rem 0;
-    }
-
     /* Status messages */
     .step-msg {
         font-size: 0.85rem;
@@ -150,7 +143,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-st.divider()
 
 # --- File uploads ---
 col_up1, col_up2 = st.columns(2)
@@ -179,7 +171,6 @@ with col_up2:
 
 # --- File Preview Section ---
 if file1 is not None or file2 is not None:
-    st.divider()
     with st.expander("🔍 Pré-visualizar Ficheiros Carregados", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade", "Extrato Bancário"])
         
@@ -228,7 +219,6 @@ if file2 is not None:
         file2.seek(0)
 
         if available_columns:
-            st.divider()
             st.markdown("**Selecione a coluna de valor do ficheiro de Extrato**")
             
             # Find if any available column matches a preferred label
@@ -252,7 +242,6 @@ if file2 is not None:
         st.error(f"Não foi possível ler os cabeçalhos do ficheiro de Extrato: {e}")
 
 # --- Run button ---
-st.divider()
 can_run = file1 is not None and file2 is not None and file2_col is not None
 run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, use_container_width=True, type="primary")
 
@@ -335,8 +324,6 @@ if run_clicked:
 
 # --- Results or Conflict UI ---
 if st.session_state.reconciliation_stage == "conflict":
-    st.divider()
-    
     conflict = st.session_state.current_conflict
     val = conflict["value"]
     c_indices = conflict["c_indices"]
@@ -466,7 +453,6 @@ if st.session_state.reconciliation_stage == "conflict":
     chosen_labels = [v for v in selections.values() if v != "Não conciliar / Manter aberto"]
     has_duplicates = len(chosen_labels) != len(set(chosen_labels))
 
-    st.markdown("---")
     if has_duplicates:
         st.error("⚠️ Atenção: Cada linha do Extrato só pode ser selecionada uma vez!")
 
@@ -521,7 +507,6 @@ elif st.session_state.reconciliation_results is not None:
     df1_final = st.session_state.reconciliation_results["df1_final"]
     df2_final = st.session_state.reconciliation_results["df2_final"]
 
-    st.divider()
     st.subheader("Resultados")
 
     col_m1, col_m2 = st.columns(2)
@@ -563,7 +548,7 @@ elif st.session_state.reconciliation_results is not None:
 
     with col_dl1:
         st.download_button(
-            label="⬇  Contabilidade restante",
+            label="⬇  Contabilidade Restante",
             data=to_excel_bytes(df1_final),
             file_name="contabilidade_restante.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -571,7 +556,7 @@ elif st.session_state.reconciliation_results is not None:
         )
     with col_dl2:
         st.download_button(
-            label="⬇  Extrato restante",
+            label="⬇  Extrato Restante",
             data=to_excel_bytes(df2_final),
             file_name="extrato_restante.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
