@@ -77,6 +77,12 @@ st.markdown("""
 # --- Preferred Labels for Extrato Column ---
 PREFERRED_LABELS = ["Valor"]
 
+def clear_results():
+    st.session_state.reconciliation_results = None
+
+if "reconciliation_results" not in st.session_state:
+    st.session_state.reconciliation_results = None
+
 # --- Header ---
 st.markdown("""
 <div class="main-title">
@@ -98,6 +104,7 @@ with col_up1:
         accept_multiple_files=False,
         key="contabilidade",
         label_visibility="collapsed",
+        on_change=clear_results,
     )
 
 with col_up2:
@@ -108,6 +115,7 @@ with col_up2:
         accept_multiple_files=False,
         key="extrato",
         label_visibility="collapsed",
+        on_change=clear_results,
     )
 
 # --- File Preview Section ---
@@ -171,6 +179,7 @@ if file2 is not None:
                 index=preferred_index,
                 placeholder="Choose the value column...",
                 label_visibility="collapsed",
+                on_change=clear_results,
             )
         else:
             st.warning("The Extrato file has no column headers.")
@@ -218,11 +227,20 @@ if run_clicked:
             # 4. Reconciliation Step 2 (E → C)
             df1_final, df2_final = conciliate_e_c(df1_step1, df2_step1, debito_col, credito_col, file2_col)
 
+            st.session_state.reconciliation_results = {
+                "df1_final": df1_final,
+                "df2_final": df2_final
+            }
+
         except Exception as e:
             st.error(f"An error occurred during reconciliation: {e}")
             st.stop()
 
-    # --- Results ---
+# --- Results ---
+if st.session_state.reconciliation_results is not None:
+    df1_final = st.session_state.reconciliation_results["df1_final"]
+    df2_final = st.session_state.reconciliation_results["df2_final"]
+
     st.divider()
     st.subheader("Results")
 
