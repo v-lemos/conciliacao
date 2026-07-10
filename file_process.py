@@ -24,7 +24,7 @@ def load_excel_and_find_header(file_path):
             break
             
     if header_row_idx is None:
-        raise ValueError(f"Could not find a row containing both 'Débito' and 'Crédito' headers in {os.path.basename(file_path)}.")
+        raise ValueError(f"Não foi possível encontrar uma linha com os cabeçalhos 'Débito' e 'Crédito' em {os.path.basename(file_path)}.")
         
     # Re-read the file setting the correct header row
     df = pd.read_excel(file_path, header=header_row_idx)

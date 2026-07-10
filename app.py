@@ -146,7 +146,7 @@ def extract_key_fields(row, df_cols):
 st.markdown("""
 <div class="main-title">
     <h1>Conciliação Bancária</h1>
-    <p>Upload your files, pick the value column, and reconcile.</p>
+    <p>Carregue os seus ficheiros, selecione a coluna de valor e concilie.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -158,7 +158,7 @@ col_up1, col_up2 = st.columns(2)
 with col_up1:
     st.markdown("**Contabilidade**")
     file1 = st.file_uploader(
-        "Upload the Contabilidade file",
+        "Carregue o ficheiro de Contabilidade",
         type=["xlsx", "xls", "xlsm", "xlsb"],
         accept_multiple_files=False,
         key="contabilidade",
@@ -169,7 +169,7 @@ with col_up1:
 with col_up2:
     st.markdown("**Extrato Bancário**")
     file2 = st.file_uploader(
-        "Upload the Extrato Bancário file",
+        "Carregue o ficheiro de Extrato Bancário",
         type=["xlsx", "xls", "xlsm", "xlsb"],
         accept_multiple_files=False,
         key="extrato",
@@ -180,7 +180,7 @@ with col_up2:
 # --- File Preview Section ---
 if file1 is not None or file2 is not None:
     st.divider()
-    with st.expander("🔍 Preview Uploaded Files", expanded=False):
+    with st.expander("🔍 Pré-visualizar Ficheiros Carregados", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade", "Extrato Bancário"])
         
         with tab1:
@@ -202,9 +202,9 @@ if file1 is not None or file2 is not None:
                         
                     st.dataframe(df1_preview, use_container_width=True, hide_index=True)
                 except Exception as e:
-                    st.error(f"Could not read Contabilidade preview: {e}")
+                    st.error(f"Não foi possível ler a pré-visualização da Contabilidade: {e}")
             else:
-                st.info("Upload a Contabilidade file to view its preview.")
+                st.info("Carregue um ficheiro de Contabilidade para ver a sua pré-visualização.")
                 
         with tab2:
             if file2 is not None:
@@ -214,9 +214,9 @@ if file1 is not None or file2 is not None:
                     file2.seek(0)
                     st.dataframe(df2_preview, use_container_width=True, hide_index=True)
                 except Exception as e:
-                    st.error(f"Could not read Extrato preview: {e}")
+                    st.error(f"Não foi possível ler a pré-visualização do Extrato: {e}")
             else:
-                st.info("Upload an Extrato file to view its preview.")
+                st.info("Carregue um ficheiro de Extrato para ver a sua pré-visualização.")
 
 # --- Column picker for Extrato (only shown when file2 is uploaded) ---
 file2_col = None
@@ -229,7 +229,7 @@ if file2 is not None:
 
         if available_columns:
             st.divider()
-            st.markdown("**Select the value column from the Extrato file**")
+            st.markdown("**Selecione a coluna de valor do ficheiro de Extrato**")
             
             # Find if any available column matches a preferred label
             preferred_index = None
@@ -239,22 +239,22 @@ if file2 is not None:
                     break
             
             file2_col = st.selectbox(
-                "Column",
+                "Coluna",
                 options=available_columns,
                 index=preferred_index,
-                placeholder="Choose the value column...",
+                placeholder="Escolha a coluna de valor...",
                 label_visibility="collapsed",
                 on_change=clear_results,
             )
         else:
-            st.warning("The Extrato file has no column headers.")
+            st.warning("O ficheiro de Extrato não tem cabeçalhos de coluna.")
     except Exception as e:
-        st.error(f"Could not read Extrato file headers: {e}")
+        st.error(f"Não foi possível ler os cabeçalhos do ficheiro de Extrato: {e}")
 
 # --- Run button ---
 st.divider()
 can_run = file1 is not None and file2 is not None and file2_col is not None
-run_clicked = st.button("▶  Run Reconciliation", disabled=not can_run, use_container_width=True, type="primary")
+run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, use_container_width=True, type="primary")
 
 # --- Processing ---
 def advance_reconciliation():
@@ -287,7 +287,7 @@ def advance_reconciliation():
 
 if run_clicked:
     clear_results()
-    with st.spinner("Reading and reconciling files…"):
+    with st.spinner("A ler e a conciliar os ficheiros..."):
         try:
             # 1. Load Contabilidade with auto-header finder
             # Save uploaded file to a temp path so load_excel_and_find_header can read it
@@ -305,7 +305,7 @@ if run_clicked:
             credito_col = next((c for c in df1.columns if str(c).strip().lower() in ['crédito', 'credito']), None)
 
             if not debito_col or not credito_col:
-                st.error(f"Could not find 'Débito' and 'Crédito' columns in Contabilidade. Found: {list(df1.columns)}")
+                st.error(f"Não foi possível encontrar as colunas 'Débito' e 'Crédito' na Contabilidade. Encontrado: {list(df1.columns)}")
                 st.stop()
 
             # Filter out invalid/empty/non-numeric rows
@@ -315,7 +315,7 @@ if run_clicked:
             df2 = pd.read_excel(file2)
 
             if file2_col not in df2.columns:
-                st.error(f"Column '{file2_col}' not found in the Extrato file.")
+                st.error(f"A coluna '{file2_col}' não foi encontrada no ficheiro de Extrato.")
                 st.stop()
 
             # Initialize reconciliation state
@@ -330,7 +330,7 @@ if run_clicked:
             advance_reconciliation()
 
         except Exception as e:
-            st.error(f"An error occurred during reconciliation: {e}")
+            st.error(f"Ocorreu um erro durante a conciliação: {e}")
             st.stop()
 
 # --- Results or Conflict UI ---
@@ -522,13 +522,13 @@ elif st.session_state.reconciliation_results is not None:
     df2_final = st.session_state.reconciliation_results["df2_final"]
 
     st.divider()
-    st.subheader("Results")
+    st.subheader("Resultados")
 
     col_m1, col_m2 = st.columns(2)
     with col_m1:
         st.markdown(
             f"""<div class="metric-card">
-                <div class="label">Unreconciled — Contabilidade</div>
+                <div class="label">Não Conciliado — Contabilidade</div>
                 <div class="value">{len(df1_final)}</div>
             </div>""",
             unsafe_allow_html=True,
@@ -536,7 +536,7 @@ elif st.session_state.reconciliation_results is not None:
     with col_m2:
         st.markdown(
             f"""<div class="metric-card">
-                <div class="label">Unreconciled — Extrato</div>
+                <div class="label">Não Conciliado — Extrato</div>
                 <div class="value">{len(df2_final)}</div>
             </div>""",
             unsafe_allow_html=True,
@@ -545,7 +545,7 @@ elif st.session_state.reconciliation_results is not None:
     st.write("")  # spacer
 
     # --- Preview tables ---
-    with st.expander("🔍 Preview Unreconciled Rows", expanded=False):
+    with st.expander("🔍 Pré-visualizar Linhas Não Conciliadas", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade Restante", "Extrato Restante"])
         with tab1:
             st.dataframe(df1_final, use_container_width=True, hide_index=True)
