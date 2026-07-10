@@ -26,6 +26,8 @@ I will not at any point apologize for mixing up English and Portuguese throughou
 
    2.1. You may review the uploaded data using the **Preview** dropdown.
 3. Click **Run Reconciliation** to process the records.
+
+   3.1. You may be asked to solve conflicts if more than a match is found. Don't be scared.
 4. Stare at your screen to see the results.
 
    4.1. You may then download the unreconciled remainder sheets.

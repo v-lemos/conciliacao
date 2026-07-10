@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import io
-from file_process import load_excel_and_find_header, clean_float
-# Import reconciliation functions
-from conciliate import conciliate_c_e
+from file_process import load_excel_and_find_header, clean_float, filter_invalid_rows
+from conciliate import conciliate_c_e, find_next_reconciliation_step
 
 # --- Page config ---
 st.set_page_config(
@@ -74,14 +73,71 @@ PREFERRED_LABELS = ["Valor"]
 
 def clear_results():
     st.session_state.reconciliation_results = None
+    st.session_state.df1_remaining = None
+    st.session_state.df2_remaining = None
+    st.session_state.reconciliation_stage = None
+    st.session_state.current_conflict = None
+    st.session_state.unmatched_df1 = None
+    st.session_state.debito_col = None
+    st.session_state.credito_col = None
+    st.session_state.file2_col = None
 
 if "reconciliation_results" not in st.session_state:
     st.session_state.reconciliation_results = None
+if "df1_remaining" not in st.session_state:
+    st.session_state.df1_remaining = None
+if "df2_remaining" not in st.session_state:
+    st.session_state.df2_remaining = None
+if "reconciliation_stage" not in st.session_state:
+    st.session_state.reconciliation_stage = None
+if "current_conflict" not in st.session_state:
+    st.session_state.current_conflict = None
+if "unmatched_df1" not in st.session_state:
+    st.session_state.unmatched_df1 = None
+if "debito_col" not in st.session_state:
+    st.session_state.debito_col = None
+if "credito_col" not in st.session_state:
+    st.session_state.credito_col = None
+if "file2_col" not in st.session_state:
+    st.session_state.file2_col = None
+
+def extract_key_fields(row, df_cols):
+    # Find candidate columns
+    date_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["data", "date", "dt", "dia"])), None)
+    desc_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["desc", "hist", "detalhe", "narrative", "info", "nome", "concepto", "parceiro", "cliente", "fornecedor"])), None)
+    doc_col = next((c for c in df_cols if any(k in str(c).lower() for k in ["doc", "ref", "num", "id", "trans", "cheque", "recibo"])), None)
+    
+    # Extract values
+    date_val = "N/A"
+    if date_col is not None and pd.notna(row[date_col]):
+        val = row[date_col]
+        if hasattr(val, "strftime"):
+            date_val = val.strftime("%d/%m/%Y")
+        else:
+            date_val = str(val).split(" ")[0]
+            
+    desc_val = "N/A"
+    if desc_col is not None and pd.notna(row[desc_col]):
+        desc_val = str(row[desc_col]).strip()
+        
+    doc_val = ""
+    if doc_col is not None and pd.notna(row[doc_col]):
+        doc_val = str(row[doc_col]).strip()
+        
+    # Fallback if date/desc are not found
+    if date_val == "N/A" and desc_val == "N/A":
+        # Just grab the first few columns
+        non_empty_parts = [f"{col}: {val}" for col, val in row.items() if pd.notna(val) and str(val).strip() != ""]
+        if len(non_empty_parts) > 0:
+            desc_val = " | ".join(non_empty_parts[:3])
+            
+    return date_val, desc_val, doc_val
+
 
 # --- Header ---
 st.markdown("""
 <div class="main-title">
-    <h1>🏦 Conciliação Bancária</h1>
+    <h1>Conciliação Bancária</h1>
     <p>Upload your files, pick the value column, and reconcile.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -130,6 +186,12 @@ if file1 is not None or file2 is not None:
                     df1_preview = load_excel_and_find_header(tmp_preview_path)
                     os.unlink(tmp_preview_path)
                     file1.seek(0)
+                    
+                    preview_debito = next((c for c in df1_preview.columns if str(c).strip().lower() in ['débito', 'debito']), None)
+                    preview_credito = next((c for c in df1_preview.columns if str(c).strip().lower() in ['crédito', 'credito']), None)
+                    if preview_debito and preview_credito:
+                        df1_preview = filter_invalid_rows(df1_preview, preview_debito, preview_credito)
+                        
                     st.dataframe(df1_preview, use_container_width=True, hide_index=True)
                 except Exception as e:
                     st.error(f"Could not read Contabilidade preview: {e}")
@@ -187,7 +249,36 @@ can_run = file1 is not None and file2 is not None and file2_col is not None
 run_clicked = st.button("▶  Run Reconciliation", disabled=not can_run, use_container_width=True, type="primary")
 
 # --- Processing ---
+def advance_reconciliation():
+    df1_remaining = st.session_state.df1_remaining
+    df2_remaining = st.session_state.df2_remaining
+    debito_col = st.session_state.debito_col
+    credito_col = st.session_state.credito_col
+    file2_col = st.session_state.file2_col
+
+    df1_next, df2_next, stage, conflict = find_next_reconciliation_step(
+        df1_remaining, df2_remaining, debito_col, credito_col, file2_col
+    )
+    
+    st.session_state.df1_remaining = df1_next
+    st.session_state.df2_remaining = df2_next
+    st.session_state.reconciliation_stage = stage
+    st.session_state.current_conflict = conflict
+    
+    if stage == "done":
+        # Concatenate any manually unmatched Contabilidade rows back
+        if st.session_state.unmatched_df1 is not None and not st.session_state.unmatched_df1.empty:
+            df1_final = pd.concat([df1_next, st.session_state.unmatched_df1])
+        else:
+            df1_final = df1_next
+            
+        st.session_state.reconciliation_results = {
+            "df1_final": df1_final,
+            "df2_final": df2_next
+        }
+
 if run_clicked:
+    clear_results()
     with st.spinner("Reading and reconciling files…"):
         try:
             # 1. Load Contabilidade with auto-header finder
@@ -209,6 +300,9 @@ if run_clicked:
                 st.error(f"Could not find 'Débito' and 'Crédito' columns in Contabilidade. Found: {list(df1.columns)}")
                 st.stop()
 
+            # Filter out invalid/empty/non-numeric rows
+            df1 = filter_invalid_rows(df1, debito_col, credito_col)
+
             # 2. Load Extrato
             df2 = pd.read_excel(file2)
 
@@ -216,20 +310,206 @@ if run_clicked:
                 st.error(f"Column '{file2_col}' not found in the Extrato file.")
                 st.stop()
 
-            # 3. Reconciliation (C → E)
-            df1_final, df2_final = conciliate_c_e(df1, df2, debito_col, credito_col, file2_col)
+            # Initialize reconciliation state
+            st.session_state.df1_remaining = df1.copy()
+            st.session_state.df2_remaining = df2.copy()
+            st.session_state.debito_col = debito_col
+            st.session_state.credito_col = credito_col
+            st.session_state.file2_col = file2_col
+            st.session_state.unmatched_df1 = pd.DataFrame(columns=df1.columns)
 
-            st.session_state.reconciliation_results = {
-                "df1_final": df1_final,
-                "df2_final": df2_final
-            }
+            # Run reconciliation
+            advance_reconciliation()
 
         except Exception as e:
             st.error(f"An error occurred during reconciliation: {e}")
             st.stop()
 
-# --- Results ---
-if st.session_state.reconciliation_results is not None:
+# --- Results or Conflict UI ---
+if st.session_state.reconciliation_stage == "conflict":
+    st.divider()
+    
+    conflict = st.session_state.current_conflict
+    val = conflict["value"]
+    c_indices = conflict["c_indices"]
+    e_indices = conflict["e_indices"]
+    
+    df1_rem = st.session_state.df1_remaining
+    df2_rem = st.session_state.df2_remaining
+    debito_col = st.session_state.debito_col
+    credito_col = st.session_state.credito_col
+    file2_col = st.session_state.file2_col
+
+    # Format title card with gradient orange styling
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #f57c00 0%, #ff9800 100%);
+            padding: 1.5rem;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 15px rgba(245, 124, 0, 0.15);
+        ">
+            <h3 style="margin: 0; color: white; font-weight: 700; font-size: 1.35rem;">⚠️ Resolver Conflito de Correspondência</h3>
+            <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 0.95rem; line-height: 1.4;">
+                Múltiplas transações encontradas com o valor correspondente a <b>{abs(val):,.2f}€</b> ({'Crédito' if val >= 0 else 'Débito'}).<br/>
+                Contabilidade: <b>{len(c_indices)}</b> {'linhas' if len(c_indices) >= 2 else 'linha'} vs Extrato: <b>{len(e_indices)}</b> {'linhas' if len(e_indices) >= 2 else 'linha'}.
+                Por favor, faça as associações corretas abaixo.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Pre-format Extrato options
+    extrato_options = ["Não conciliar / Manter aberto"]
+    extrato_mapping = {}
+    extrato_mapping["Não conciliar / Manter aberto"] = "Unmatched / Keep"
+    for idx_e in e_indices:
+        row = df2_rem.loc[idx_e]
+        e_date, e_desc, e_doc = extract_key_fields(row, df2_rem.columns)
+        
+        parts = []
+        if e_date != "N/A":
+            parts.append(e_date)
+        if e_desc != "N/A":
+            truncated_desc = e_desc[:40] + "..." if len(e_desc) > 40 else e_desc
+            parts.append(truncated_desc)
+        if e_doc:
+            parts.append(f"Doc: {e_doc}")
+            
+        option_label = f"Linha {idx_e} — " + " | ".join(parts)
+        extrato_options.append(option_label)
+        extrato_mapping[option_label] = idx_e
+
+    # Setup columns layout
+    col_c, col_e = st.columns([1.1, 0.9])
+    
+    selections = {}
+    
+    with col_c:
+        st.markdown("### 📄 Contabilidade")
+        for idx_c in c_indices:
+            row_c = df1_rem.loc[idx_c]
+            c_date, c_desc, c_doc = extract_key_fields(row_c, df1_rem.columns)
+            
+            with st.container(border=True):
+                st.markdown(f"**Lançamento #{idx_c}**")
+                
+                details_html = f"""
+                <div style='font-size: 0.88rem; margin-bottom: 12px; line-height: 1.45;'>
+                    <b>Data:</b> {c_date}<br/>
+                    <b>Descrição:</b> {c_desc}
+                    {f'<br/><b>Doc:</b> {c_doc}' if c_doc else ''}
+                </div>
+                """
+                st.markdown(details_html, unsafe_allow_html=True)
+                
+                selected = st.selectbox(
+                    "Selecione o correspondente do Extrato:",
+                    options=extrato_options,
+                    key=f"match_group_{val}_{idx_c}",
+                    label_visibility="collapsed"
+                )
+                selections[idx_c] = selected
+
+    # Gather matching details for badge updates
+    with col_e:
+        st.markdown("### 🏦 Extrato Bancário")
+        for idx_e in e_indices:
+            row_e = df2_rem.loc[idx_e]
+            e_date, e_desc, e_doc = extract_key_fields(row_e, df2_rem.columns)
+            
+            # Find which Contabilidade row has matched this Extrato item
+            matched_by = []
+            for c_idx, sel_label in selections.items():
+                if sel_label != "Não conciliar / Manter aberto" and extrato_mapping[sel_label] == idx_e:
+                    matched_by.append(c_idx)
+            
+            with st.container(border=True):
+                if len(matched_by) == 0:
+                    status_badge = '<span style="background-color: #1e3a1e; color: #4ade80; border: 1px solid #2e7d32; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Disponível</span>'
+                elif len(matched_by) == 1:
+                    status_badge = f'<span style="background-color: #1e293b; color: #38bdf8; border: 1px solid #1d4ed8; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">-> Lançamento #{matched_by[0]}</span>'
+                else:
+                    status_badge = f'<span style="background-color: #450a0a; color: #f87171; border: 1px solid #b91c1c; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">Duplicado (#{", ".join(map(str, matched_by))})</span>'
+                
+                st.markdown(
+                    f"""
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 0.95rem;">Lançamento #{idx_e}</span>
+                        {status_badge}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                details_html = f"""
+                <div style='font-size: 0.88rem; line-height: 1.45;'>
+                    <b>Data:</b> {e_date}<br/>
+                    <b>Descrição:</b> {e_desc}
+                    {f'<br/><b>Doc:</b> {e_doc}' if e_doc else ''}
+                </div>
+                """
+                st.markdown(details_html, unsafe_allow_html=True)
+
+    # Validation: check for duplicate matches
+    chosen_labels = [v for v in selections.values() if v != "Não conciliar / Manter aberto"]
+    has_duplicates = len(chosen_labels) != len(set(chosen_labels))
+
+    st.markdown("---")
+    if has_duplicates:
+        st.error("⚠️ Atenção: Cada linha do Extrato só pode ser selecionada uma vez!")
+
+    col_btn_left, col_btn_right = st.columns([1, 1])
+    with col_btn_left:
+        # Button to confirm matches
+        confirm_clicked = st.button("Confirmar Correspondências", type="primary", use_container_width=True, disabled=has_duplicates)
+        
+    if confirm_clicked:
+        c_to_drop = []
+        e_to_drop = []
+        c_unmatched = []
+        
+        for idx_c, selected_label in selections.items():
+            mapped_val = extrato_mapping[selected_label]
+            if mapped_val == "Unmatched / Keep":
+                c_unmatched.append(idx_c)
+            else:
+                c_to_drop.append(idx_c)
+                e_to_drop.append(mapped_val)
+                
+        # 1. Handle matched ones (delete from both)
+        if c_to_drop:
+            st.session_state.df1_remaining = df1_rem.drop(index=c_to_drop)
+        if e_to_drop:
+            st.session_state.df2_remaining = df2_rem.drop(index=e_to_drop)
+            
+        # 2. Handle unmatched Contabilidade items:
+        # "delete the row and add them to the list of unmatched items"
+        if c_unmatched:
+            # We append the unmatched rows to unmatched_df1
+            st.session_state.unmatched_df1 = pd.concat([st.session_state.unmatched_df1, df1_rem.loc[c_unmatched]])
+            # Drop them from active df1_remaining so they don't block the next stages
+            st.session_state.df1_remaining = st.session_state.df1_remaining.drop(index=c_unmatched)
+            
+        st.toast("Correspondências processadas!", icon="✅")
+        
+        # Proceed
+        advance_reconciliation()
+        st.rerun()
+
+    # Expander with raw complete tables for reference
+    with st.expander("🔍 Visualizar tabelas completas em conflito", expanded=False):
+        tab1, tab2 = st.tabs(["Contabilidade Completa", "Extrato Completo"])
+        with tab1:
+            st.dataframe(df1_rem.loc[c_indices], use_container_width=True, hide_index=True)
+        with tab2:
+            st.dataframe(df2_rem.loc[e_indices], use_container_width=True, hide_index=True)
+
+
+elif st.session_state.reconciliation_results is not None:
     df1_final = st.session_state.reconciliation_results["df1_final"]
     df2_final = st.session_state.reconciliation_results["df2_final"]
 
