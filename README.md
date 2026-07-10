@@ -18,7 +18,7 @@ I will not at any point apologize for mixing up English and Portuguese throughou
 
 ## 🌐 How to Run on the Web
 
-1. (and only step) Just open the app right [here](https://conciliacaobancariabyvl.streamlit.app/)!
+1 (and only step). Just open the app right [here](https://conciliacaobancariabyvl.streamlit.app/)!
 
 ## 📄 How to Actually Use
 1. Upload the **Contabilidade** and **Extrato Bancário** Excel files.
