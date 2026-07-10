@@ -25,9 +25,9 @@ I will not at any point apologize for mixing up English and Portuguese throughou
 2. Select the value column from the Extrato file (automatically pre-selects `Valor` and other... suggestive words if present).
 
    2.1. You may review the uploaded data using the **Preview** dropdown.
-3. Click **Run Reconciliation** to process the records.
+3. Click **Executar Conciliação** to process the records.
 
-   3.1. You may be asked to solve conflicts if more than a match is found. Don't be scared.
-4. Stare at your screen to see the results.
+   3.1. You may be asked to solve conflicts if more than a match is found. Don't be scared, just do it, nice and easy.
+4. Stare at your screen like a dumbass to see the results.
 
    4.1. You may then download the unreconciled remainder sheets.
