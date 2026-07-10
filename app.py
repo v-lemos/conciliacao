@@ -1,3 +1,11 @@
+import sys
+import importlib
+
+# Force reload of local modules to prevent Streamlit caching issues
+for module_name in ['file_process', 'conciliate']:
+    if module_name in sys.modules:
+        importlib.reload(sys.modules[module_name])
+
 import streamlit as st
 import pandas as pd
 import os
