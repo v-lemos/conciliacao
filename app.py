@@ -104,7 +104,7 @@ st.markdown("""
 
 
 # --- Preferred Labels for Extrato Column ---
-PREFERRED_LABELS = ["Valor"]
+PREFERRED_LABELS = ["Valor", "Montante"]
 
 def clear_results():
     st.session_state.reconciliation_results = None
