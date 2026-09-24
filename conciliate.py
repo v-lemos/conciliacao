@@ -16,12 +16,14 @@ def precompute_value_cents(df, debito_col, credito_col):
             raise ValueError(f"Montante inválido na linha {row.name} da Contabilidade: {exc}") from exc
         D = D or 0.0
         C = C or 0.0
+        # A posting must have exactly one nonzero side so its sign is unambiguous.
         if D != 0 and C != 0:
             raise ValueError(f"A linha {row.name} da Contabilidade tem Débito e Crédito preenchidos.")
         if D != 0:
             return int(round(D * 100))
         elif C != 0:
             return int(round(-C * 100))
+        # Keep a zero posting as zero; it cannot match a nonzero accounting amount.
         return 0
     df['_value_cents'] = df.apply(row_to_cents, axis=1)
 
@@ -40,6 +42,7 @@ def precompute_extrato_cents(df, value_col, invert_sign=False):
         if amount is None:
             raise ValueError(f"Montante vazio na linha {idx} do Extrato.")
         cents = int(round(amount * 100))
+        # Inversion changes only the comparison key; the original statement amount stays intact.
         return -cents if invert_sign else cents
     df['_value_cents'] = df.apply(to_cents, axis=1)
 
@@ -50,6 +53,7 @@ def group_matches_by_value(df1, df2):
     """
     c_groups = {}
     for idx, cents in df1['_value_cents'].items():
+        # Zero accounting rows are intentionally left unmatched, not grouped.
         if cents == 0:
             continue
         c_groups.setdefault(cents, []).append(idx)
@@ -78,6 +82,7 @@ def find_next_reconciliation_step(df1, df2, blocked_values=None):
     """
     df1_remaining = df1.copy()
     df2_remaining = df2.copy()
+    # Values resolved manually stay excluded from automatic count-based matching.
     blocked_values = set(blocked_values or ())
 
     # Build dictionaries once from pre-computed cents
@@ -95,14 +100,14 @@ def find_next_reconciliation_step(df1, df2, blocked_values=None):
             # No match in extrato — skip (will remain as unmatched)
             continue
         if len(c_indices) == len(e_indices):
-            # Auto-reconcile: equal counts
+            # The rule is occurrence-count equality for this signed amount.
             to_drop_df1.extend(c_indices)
             to_drop_df2.extend(e_indices)
         elif first_conflict is None:
-            # First conflict found
+            # Leave differing-count rows for the UI to resolve manually.
             first_conflict = {"value": val, "c_indices": c_indices, "e_indices": e_indices}
 
-    # Drop auto-reconciled rows
+    # Remove every automatically reconciled group from the remaining dataframes.
     if to_drop_df1:
         df1_remaining.drop(index=to_drop_df1, inplace=True)
     if to_drop_df2:
