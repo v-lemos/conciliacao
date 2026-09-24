@@ -14,8 +14,9 @@ import streamlit as st
 import pandas as pd
 import os
 import io
-from file_process import load_excel_and_find_header, clean_float, filter_invalid_rows
-from conciliate import find_next_reconciliation_step
+from file_process import load_excel_and_find_header, filter_invalid_rows
+from conciliate import find_next_reconciliation_step, precompute_value_cents, precompute_extrato_cents
+from pdfparsing.santander import parse_pdf_to_excel
 
 # --- Page config ---
 st.set_page_config(
@@ -104,7 +105,7 @@ st.markdown("""
 
 
 # --- Preferred Labels for Extrato Column ---
-PREFERRED_LABELS = ["Valor", "Montante"]
+PREFERRED_LABELS = ["Valor", "Montante", "valor", "montante"]
 
 def clear_results():
     st.session_state.reconciliation_results = None
@@ -113,9 +114,6 @@ def clear_results():
     st.session_state.reconciliation_stage = None
     st.session_state.current_conflict = None
     st.session_state.unmatched_df1 = None
-    st.session_state.debito_col = None
-    st.session_state.credito_col = None
-    st.session_state.file2_col = None
 
 if "reconciliation_results" not in st.session_state:
     st.session_state.reconciliation_results = None
@@ -129,12 +127,6 @@ if "current_conflict" not in st.session_state:
     st.session_state.current_conflict = None
 if "unmatched_df1" not in st.session_state:
     st.session_state.unmatched_df1 = None
-if "debito_col" not in st.session_state:
-    st.session_state.debito_col = None
-if "credito_col" not in st.session_state:
-    st.session_state.credito_col = None
-if "file2_col" not in st.session_state:
-    st.session_state.file2_col = None
 
 def extract_key_fields(row, df_cols):
     # Find candidate columns
@@ -194,12 +186,31 @@ with col_up1:
 with col_up2:
     file2 = st.file_uploader(
         "Extrato Bancário",
-        type=["xlsx", "xls", "xlsm", "xlsb"],
+        type=["xlsx", "xls", "xlsm", "xlsb", "pdf"],
         accept_multiple_files=False,
         key="extrato",
-        help="Ficheiro do extrato bancário, obtido num banco. Caso só tenha em PDF ou noutro tipo de ficheiro que não seja um dos referidos abaixo, sugiro que peça ao ChatGPT que converta a tabela no seu ficheiro para um dos ficheiros compatíveis.",
+        help="Carregue o extrato bancário em Excel ou PDF. Para PDFs, escolha o banco para converter o extrato.",
         on_change=clear_results,
     )
+
+is_pdf_statement = file2 is not None and file2.name.lower().endswith(".pdf")
+statement_excel_bytes = None
+if is_pdf_statement:
+    bank = st.selectbox("Selecione o banco do Extrato Bancário", options=["Santander"], key="statement_bank", on_change=clear_results)
+    if bank == "Santander":
+        try:
+            statement_excel_bytes = parse_pdf_to_excel(file2.getvalue())
+            st.caption("PDF Santander convertido para Excel para a conciliação.")
+        except Exception as e:
+            st.error(f"Não foi possível processar o PDF Santander: {e}")
+
+def read_statement_excel(**kwargs):
+    if is_pdf_statement:
+        if statement_excel_bytes is None:
+            raise ValueError("Selecione um banco e carregue um PDF Santander válido.")
+        return pd.read_excel(io.BytesIO(statement_excel_bytes), **kwargs)
+    file2.seek(0)
+    return pd.read_excel(file2, **kwargs)
 
 # --- File Preview Section ---
 if file1 is not None or file2 is not None:
@@ -232,9 +243,7 @@ if file1 is not None or file2 is not None:
         with tab2:
             if file2 is not None:
                 try:
-                    file2.seek(0)
-                    df2_preview = pd.read_excel(file2)
-                    file2.seek(0)
+                    df2_preview = read_statement_excel()
                     st.dataframe(df2_preview, width="stretch", hide_index=True)
                 except Exception as e:
                     st.error(f"Não foi possível ler a pré-visualização do Extrato: {e}")
@@ -245,7 +254,7 @@ if file1 is not None or file2 is not None:
 file2_col = None
 if file2 is not None:
     try:
-        df_preview = pd.read_excel(file2, nrows=0)
+        df_preview = read_statement_excel(nrows=0)
         available_columns = list(df_preview.columns)
         # Reset the file pointer so it can be read again later
         file2.seek(0)
@@ -279,12 +288,10 @@ run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, wid
 def advance_reconciliation():
     df1_remaining = st.session_state.df1_remaining
     df2_remaining = st.session_state.df2_remaining
-    debito_col = st.session_state.debito_col
-    credito_col = st.session_state.credito_col
-    file2_col = st.session_state.file2_col
+    blocked_values = st.session_state.get("blocked_conflict_values", set())
 
     df1_next, df2_next, stage, conflict = find_next_reconciliation_step(
-        df1_remaining, df2_remaining, debito_col, credito_col, file2_col
+        df1_remaining, df2_remaining, blocked_values
     )
     
     st.session_state.df1_remaining = df1_next
@@ -299,9 +306,10 @@ def advance_reconciliation():
         else:
             df1_final = df1_next
             
+        # Drop internal column before storing results
         st.session_state.reconciliation_results = {
-            "df1_final": df1_final,
-            "df2_final": df2_next
+            "df1_final": df1_final.drop(columns=['_value_cents'], errors='ignore'),
+            "df2_final": pd.concat([df2_next, st.session_state.get("unmatched_df2", pd.DataFrame(columns=df2_next.columns))]).drop(columns=['_value_cents'], errors='ignore')
         }
 
 if run_clicked:
@@ -327,23 +335,26 @@ if run_clicked:
                 st.error(f"Não foi possível encontrar as colunas 'Débito' e 'Crédito' na Contabilidade. Encontrado: {list(df1.columns)}")
                 st.stop()
 
-            # Filter out invalid/empty/non-numeric rows
+            # Remove completely empty rows; amount validation belongs to reconciliation prep.
             df1 = filter_invalid_rows(df1, debito_col, credito_col)
 
             # 2. Load Extrato
-            df2 = pd.read_excel(file2)
+            df2 = read_statement_excel()
 
             if file2_col not in df2.columns:
                 st.error(f"A coluna '{file2_col}' não foi encontrada no ficheiro de Extrato.")
                 st.stop()
 
+            # Pre-compute integer cent values once (fixes float rounding and avoids repeated clean_float calls)
+            precompute_value_cents(df1, debito_col, credito_col)
+            precompute_extrato_cents(df2, file2_col)
+
             # Initialize reconciliation state
             st.session_state.df1_remaining = df1.copy()
             st.session_state.df2_remaining = df2.copy()
-            st.session_state.debito_col = debito_col
-            st.session_state.credito_col = credito_col
-            st.session_state.file2_col = file2_col
             st.session_state.unmatched_df1 = pd.DataFrame(columns=df1.columns)
+            st.session_state.unmatched_df2 = pd.DataFrame(columns=df2.columns)
+            st.session_state.blocked_conflict_values = set()
 
             # Run reconciliation
             advance_reconciliation()
@@ -361,9 +372,6 @@ if st.session_state.reconciliation_stage == "conflict":
     
     df1_rem = st.session_state.df1_remaining
     df2_rem = st.session_state.df2_remaining
-    debito_col = st.session_state.debito_col
-    credito_col = st.session_state.credito_col
-    file2_col = st.session_state.file2_col
 
     # Format title card with gradient orange styling
     st.markdown(
@@ -378,7 +386,7 @@ if st.session_state.reconciliation_stage == "conflict":
         ">
             <h3 style="margin: 0; color: white; font-weight: 700; font-size: 1.35rem;">⚠️ Resolver Conflito de Correspondência</h3>
             <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 0.95rem; line-height: 1.4;">
-                Múltiplas transações encontradas com o valor correspondente a <b>{abs(val):,.2f}€</b> ({'Crédito' if val >= 0 else 'Débito'}).<br/>
+                Múltiplas transações encontradas com o valor correspondente a <b>{abs(val) / 100:,.2f}€</b> ({'Débito' if val >= 0 else 'Crédito'}).<br/>
                 Contabilidade: <b>{len(c_indices)}</b> {'linhas' if len(c_indices) >= 2 else 'linha'} vs Extrato: <b>{len(e_indices)}</b> {'linhas' if len(e_indices) >= 2 else 'linha'}.
                 Por favor, faça as associações corretas abaixo.
             </p>
@@ -495,6 +503,7 @@ if st.session_state.reconciliation_stage == "conflict":
         c_to_drop = []
         e_to_drop = []
         c_unmatched = []
+        e_unmatched = []
         
         for idx_c, selected_label in selections.items():
             mapped_val = extrato_mapping[selected_label]
@@ -503,6 +512,9 @@ if st.session_state.reconciliation_stage == "conflict":
             else:
                 c_to_drop.append(idx_c)
                 e_to_drop.append(mapped_val)
+
+        selected_extrato_indices = set(e_to_drop)
+        e_unmatched = [idx_e for idx_e in e_indices if idx_e not in selected_extrato_indices]
                 
         # 1. Handle matched ones (delete from both)
         if c_to_drop:
@@ -517,6 +529,14 @@ if st.session_state.reconciliation_stage == "conflict":
             st.session_state.unmatched_df1 = pd.concat([st.session_state.unmatched_df1, df1_rem.loc[c_unmatched]])
             # Drop them from active df1_remaining so they don't block the next stages
             st.session_state.df1_remaining = st.session_state.df1_remaining.drop(index=c_unmatched)
+
+        if e_unmatched:
+            st.session_state.unmatched_df2 = pd.concat([
+                st.session_state.unmatched_df2,
+                df2_rem.loc[e_unmatched],
+            ])
+
+        st.session_state.blocked_conflict_values.add(val)
             
         st.toast("Correspondências processadas!", icon="✅")
         
@@ -528,9 +548,9 @@ if st.session_state.reconciliation_stage == "conflict":
     with st.expander("🔍 Visualizar tabelas completas em conflito", expanded=False):
         tab1, tab2 = st.tabs(["Contabilidade Completa", "Extrato Completo"])
         with tab1:
-            st.dataframe(df1_rem.loc[c_indices], width="stretch", hide_index=True)
+            st.dataframe(df1_rem.loc[c_indices].drop(columns=['_value_cents'], errors='ignore'), width="stretch", hide_index=True)
         with tab2:
-            st.dataframe(df2_rem.loc[e_indices], width="stretch", hide_index=True)
+            st.dataframe(df2_rem.loc[e_indices].drop(columns=['_value_cents'], errors='ignore'), width="stretch", hide_index=True)
 
 
 elif st.session_state.reconciliation_results is not None:
