@@ -12,12 +12,12 @@ from amounts import parse_amount
 # ============================================================
 
 COLUMNS = [
-    "data",
-    "data_movimento",
-    "descricao",
-    "moeda",
-    "valor",
-    "saldo",
+    "Data",
+    "Data-Movimento",
+    "Descrição",
+    "Moeda",
+    "Valor",
+    "Saldo",
 ]
 
 
