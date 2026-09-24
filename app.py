@@ -280,6 +280,52 @@ if file2 is not None:
     except Exception as e:
         st.error(f"Não foi possível ler os cabeçalhos do ficheiro de Extrato: {e}")
 
+def handle_sign_inversion_toggle():
+    if is_pdf_statement and st.session_state.get("invert_statement_signs", False):
+        # Require confirmation every time the user switches PDF inversion on.
+        st.session_state.invert_statement_signs = False
+        st.session_state.confirm_pdf_sign_inversion = True
+    clear_results()
+
+
+if "confirm_pdf_sign_inversion" not in st.session_state:
+    st.session_state.confirm_pdf_sign_inversion = False
+
+invert_statement_signs = False
+if file2 is not None:
+    invert_statement_signs = st.checkbox(
+        "Inverter sinais do extrato para corresponder a débito e crédito",
+        value=False,
+        key="invert_statement_signs",
+        help="Por defeito, mantém os sinais do extrato. Ative para trocar positivos por negativos e vice-versa.",
+        on_change=handle_sign_inversion_toggle,
+    )
+
+@st.dialog("Confirmar inversão dos sinais")
+def confirm_pdf_sign_inversion_dialog():
+    st.write(
+        "Foi apresentado um PDF de um banco reconhecido pelo site. À partida, os sinais para o crédito e débito estarão corretamente associados. Apenas mude os sinais se souber o que está a fazer."
+    )
+    cancel_col, proceed_col = st.columns(2)
+    with cancel_col:
+        if st.button("Cancelar", key="cancel_pdf_sign_inversion", width="stretch"):
+            st.session_state.confirm_pdf_sign_inversion = False
+            st.session_state.invert_statement_signs = False
+            clear_results()
+            st.rerun()
+    with proceed_col:
+        if st.button("Proceder", key="proceed_pdf_sign_inversion", type="primary", width="stretch"):
+            st.session_state.confirm_pdf_sign_inversion = False
+            st.session_state.invert_statement_signs = True
+            clear_results()
+            st.rerun()
+
+
+if is_pdf_statement and st.session_state.confirm_pdf_sign_inversion:
+    confirm_pdf_sign_inversion_dialog()
+
+invert_statement_signs = st.session_state.get("invert_statement_signs", False)
+
 # --- Run button ---
 can_run = file1 is not None and file2 is not None and file2_col is not None
 run_clicked = st.button("▶  Executar Conciliação", disabled=not can_run, width="stretch", type="primary")
@@ -347,7 +393,7 @@ if run_clicked:
 
             # Pre-compute integer cent values once (fixes float rounding and avoids repeated clean_float calls)
             precompute_value_cents(df1, debito_col, credito_col)
-            precompute_extrato_cents(df2, file2_col)
+            precompute_extrato_cents(df2, file2_col, invert_sign=invert_statement_signs)
 
             # Initialize reconciliation state
             st.session_state.df1_remaining = df1.copy()

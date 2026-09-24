@@ -26,7 +26,7 @@ def precompute_value_cents(df, debito_col, credito_col):
     df['_value_cents'] = df.apply(row_to_cents, axis=1)
 
 
-def precompute_extrato_cents(df, value_col):
+def precompute_extrato_cents(df, value_col, invert_sign=False):
     """
     Pre-computes integer cent values for extrato rows.
     Adds a '_value_cents' column to the dataframe in-place.
@@ -39,7 +39,8 @@ def precompute_extrato_cents(df, value_col):
             raise ValueError(f"Montante inválido na linha {idx} do Extrato: {exc}") from exc
         if amount is None:
             raise ValueError(f"Montante vazio na linha {idx} do Extrato.")
-        return int(round(amount * 100))
+        cents = int(round(amount * 100))
+        return -cents if invert_sign else cents
     df['_value_cents'] = df.apply(to_cents, axis=1)
 
 
