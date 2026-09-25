@@ -6,7 +6,7 @@ import sys
 import importlib
 
 # Force reload of local modules to prevent Streamlit caching issues
-for module_name in ['file_process', 'conciliate']:
+for module_name in ['file_process', 'conciliate', 'pdfparsing.santander']:
     if module_name in sys.modules:
         importlib.reload(sys.modules[module_name])
 
@@ -383,9 +383,15 @@ if run_clicked:
 
             # Remove completely empty rows; amount validation belongs to reconciliation prep.
             df1 = filter_invalid_rows(df1, debito_col, credito_col)
+            if df1.empty:
+                st.error("A Contabilidade não tem lançamentos com valores preenchidos nas colunas Débito/Crédito.")
+                st.stop()
 
             # 2. Load Extrato
             df2 = read_statement_excel()
+            if df2.empty:
+                st.error("O Extrato não tem movimentos para conciliar. Confirme a pré-visualização e volte a carregar o ficheiro.")
+                st.stop()
 
             if file2_col not in df2.columns:
                 st.error(f"A coluna '{file2_col}' não foi encontrada no ficheiro de Extrato.")

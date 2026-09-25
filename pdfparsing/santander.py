@@ -112,98 +112,53 @@ def parse_transaction(line):
     }
 
 
+def _transaction_start(line):
+    """Return whether a line starts with the date fields of a movement."""
+    return bool(re.match(r"^\s*\d{2}-\d{2}(?:\s+\d{2}-\d{2})?\s+", line))
+
+
 # ============================================================
 # EXTRAÇÃO DO PDF
 # ============================================================
 
 def extract_transactions(pdf_path):
-    """
-    Extrai todos os movimentos do PDF.
-    """
-
+    """Extract movements from a Santander account statement PDF."""
     transactions = []
-
     inside_transactions = False
+    end_markers = (
+        "Saldo Contabilístico Final",
+        "Saldo Disponível Final",
+        "Saldo da Facilidade",
+        "Novo saldo da Facilidade",
+    )
 
     with pdfplumber.open(BytesIO(pdf_path) if isinstance(pdf_path, (bytes, bytearray)) else pdf_path) as pdf:
-
-        for page_number, page in enumerate(pdf.pages, start=1):
-
-            text = page.extract_text()
-
-            if not text:
-                continue
-
-            lines = text.splitlines()
-
-            for line in lines:
-
-                line = line.strip()
-
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            for raw_line in text.splitlines():
+                line = " ".join(raw_line.split())
                 if not line:
                     continue
 
-                # ------------------------------------------------
-                # Encontrámos o início da tabela
-                # ------------------------------------------------
-
-                if "Detalhe de Movimentos da Conta à Ordem" in line:
+                normalized_line = line.casefold()
+                if "detalhe de movimentos da conta à ordem" in normalized_line:
                     inside_transactions = True
                     continue
-
                 if not inside_transactions:
                     continue
-
-                # ------------------------------------------------
-                # Ignorar cabeçalhos repetidos
-                # ------------------------------------------------
-
-                ignored_lines = {
-                    "Data",
-                    "Mov",
-                    "Valor",
-                    "Descritivo do Movimento",
-                    "Moeda",
-                    "Saldo",
-                    "Continuação",
-                }
-
-                if line in ignored_lines:
+                if line.startswith(end_markers):
+                    return transactions
+                if line.startswith("Saldo Inicial") or line in {
+                    "Data", "Mov", "Valor", "Descritivo do Movimento",
+                    "Moeda", "Saldo", "Continuação",
+                }:
                     continue
 
-                # ------------------------------------------------
-                # Saldo inicial
-                # ------------------------------------------------
-
-                if line.startswith("Saldo Inicial"):
-                    continue
-
-                # ------------------------------------------------
-                # Fim da tabela
-                # ------------------------------------------------
-
-                if line.startswith("Saldo Contabilístico Final"):
-                    break
-
-                if line.startswith("Saldo Disponível Final"):
-                    break
-
-                if line.startswith("Saldo da Facilidade"):
-                    break
-
-                if line.startswith("Novo saldo da Facilidade"):
-                    break
-
-                # ------------------------------------------------
-                # Tentar interpretar como transação
-                # ------------------------------------------------
-
+                # This statement prints both dates, followed by description,
+                # movement value and running balance on one extracted line.
                 transaction = parse_transaction(line)
-
                 if transaction:
                     transactions.append(transaction)
-                    continue
-
 
     return transactions
 
@@ -213,7 +168,21 @@ def extract_transactions(pdf_path):
 # ============================================================
 
 def clean_dataframe(transactions):
-    df = pd.DataFrame(transactions, columns=COLUMNS)
+    # Parser records use internal lowercase keys; map them to the workbook's
+    # user-facing column names (passing COLUMNS directly silently made every
+    # exported cell empty because pandas could not match the keys).
+    column_mapping = {
+        "Data": "data",
+        "Data-Movimento": "data_movimento",
+        "Descrição": "descricao",
+        "Moeda": "moeda",
+        "Valor": "valor",
+        "Saldo": "saldo",
+    }
+    df = pd.DataFrame(
+        [{column: transaction.get(key) for column, key in column_mapping.items()} for transaction in transactions],
+        columns=COLUMNS,
+    )
 
     if df.empty:
         return df
